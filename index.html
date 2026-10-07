@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Karambol 2 Pemain</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: #1a0f0a;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    font-family: system-ui, sans-serif;
+    color: #f5deb3;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 6px;
+    padding: 6px; max-height: 100vh;
+  }
+  .scoreboard {
+    display: flex; gap: 10px; align-items: center;
+  }
+  .pinfo {
+    padding: 4px 12px; border-radius: 10px;
+    background: #2a1a12; border: 2px solid #3a2418;
+    transition: all .2s; text-align: center; min-width: 105px;
+  }
+  .pinfo.aktif {
+    background: #4a2a18; border-color: #f5deb3;
+    box-shadow: 0 0 14px rgba(245, 222, 179, .5);
+  }
+  .pinfo .nama { font-size: 10px; color: #b8a080; }
+  .pinfo .skor { font-size: 18px; font-weight: bold; color: #f5deb3; }
+
+  canvas {
+    background: #3a2418;
+    border-radius: 10px;
+    touch-action: none;
+    max-width: 92vw; max-height: 50vh;
+    display: block;
+    box-shadow: 0 0 30px rgba(0,0,0,.6);
+  }
+
+  /* ---------- Kontrol pemain ---------- */
+  .kontrol {
+    display: flex; gap: 10px; align-items: center;
+    padding: 4px 10px;
+    border-radius: 12px;
+    transition: opacity .25s, box-shadow .25s;
+  }
+  .kontrol.non-aktif {
+    opacity: 0.35;
+    pointer-events: none;
+  }
+  .kontrol.aktif-p2 {
+    box-shadow: 0 0 14px rgba(96, 165, 250, .35);
+  }
+  .kontrol.aktif-p1 {
+    box-shadow: 0 0 14px rgba(217, 119, 6, .35);
+  }
+  .kontrol .label {
+    font-size: 11px; color: #b8a080; min-width: 52px;
+    text-align: center;
+  }
+  .kontrol button {
+    width: 62px; height: 46px;
+    border: none; border-radius: 12px;
+    background: linear-gradient(180deg, #4a2a18, #2a1a12);
+    color: #f5deb3; font-size: 22px; font-weight: bold;
+    cursor: pointer; box-shadow: 0 3px 0 #0f0705;
+    touch-action: manipulation;
+  }
+  .kontrol button:active {
+    transform: translateY(3px);
+    background: linear-gradient(180deg, #f5deb3, #c9a878);
+    color: #2a1a12; box-shadow: none;
+  }
+
+  .info {
+    font-size: 11px; color: #b8a080;
+    text-align: center; max-width: 90vw;
+  }
+
+  .pesan {
+    position: absolute; top: 10px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,.8);
+    padding: 6px 14px; border-radius: 20px;
+    font-size: 13px; color: #f5deb3;
+    pointer-events: none; opacity: 0;
+    transition: opacity .3s;
+    z-index: 10; white-space: nowrap;
+  }
+  .pesan.tampil { opacity: 1; }
+
+  @media (max-height: 700px) {
+    canvas { max-height: 42vh; }
+    .kontrol button { width: 54px; height: 40px; font-size: 19px; }
+    .pinfo .skor { font-size: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="pesan" id="pesan"></div>
+<div class="wrap">
+  <div class="scoreboard">
+    <div class="pinfo" id="p2">
+      <div class="nama">PEMAIN 2 · Atas</div>
+      <div class="skor" id="skor2">0</div>
+    </div>
+    <div class="pinfo aktif" id="p1b">
+      <div class="nama">PEMAIN 1 · Bawah</div>
+      <div class="skor" id="skor1">0</div>
+    </div>
+  </div>
+
+  <!-- Kontrol Pemain 2 (atas) -->
+  <div class="kontrol" id="kontrol-atas">
+    <button id="kiri-atas">◀</button>
+    <div class="label">P2</div>
+    <button id="kanan-atas">▶</button>
+  </div>
+
+  <canvas id="game" width="600" height="600"></canvas>
+
+  <!-- Kontrol Pemain 1 (bawah) -->
+  <div class="kontrol aktif-p1" id="kontrol-bawah">
+    <button id="kiri-bawah">◀</button>
+    <div class="label">P1</div>
+    <button id="kanan-bawah">▶</button>
+  </div>
+
+  <div class="info">Geser di papan untuk membidik & lepas untuk menembak.</div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // ---------- Konstanta papan ----------
+  const MARGIN = 45;
+  const BX = MARGIN, BY = MARGIN;
+  const BW = W - MARGIN * 2, BH = H - MARGIN * 2;
+  const CX = W / 2, CY = H / 2;
+
+  const POCKET_R = 22;
+  const POCKETS = [
+    { x: BX + 30, y: BY + 30 },
+    { x: BX + BW - 30, y: BY + 30 },
+    { x: BX + 30, y: BY + BH - 30 },
+    { x: BX + BW - 30, y: BY + BH - 30 }
+  ];
+
+  const COIN_R = 11;
+  const STRIKER_R = 14;
+  const FRICTION = 0.987;
+  const MIN_SPEED = 0.08;
+  const MAX_POWER = 22;
+  const SUBSTEPS = 5;
+  const BASE_INSET = 60;
+
+  // ---------- State ----------
+  let coins = [];
+  let striker = null;
+  let currentPlayer = 0;
+  let scores = [0, 0];
+  let state = 'play';
+  let pocketedThisTurn = 0;
+  let strikerFoul = false;
+
+  let aiming = false;
+  let aimPos = null;
+
+  // Gerak striker (4 arah: tiap pemain punya sendiri)
+  let move = {
+    atas:  { kiri: false, kanan: false },
+    bawah: { kiri: false, kanan: false }
+  };
+
+  // ---------- Pesan ----------
+  const pesanEl = document.getElementById('pesan');
+  let pesanTimer = null;
+  function tampilPesan(txt) {
+    pesanEl.textContent = txt;
+    pesanEl.classList.add('tampil');
+    clearTimeout(pesanTimer);
+    pesanTimer = setTimeout(() => pesanEl.classList.remove('tampil'), 1600);
+  }
+
+  // ---------- Inisialisasi koin ----------
+  function buatKoin() {
+    const list = [];
+    list.push({ x: CX, y: CY, type: 'queen' });
+
+    const R1 = COIN_R * 2.05;
+    for (let i = 0; i < 6; i++) {
+      const a = i * Math.PI / 3 - Math.PI / 2;
+      list.push({
+        x: CX + Math.cos(a) * R1,
+        y: CY + Math.sin(a) * R1,
+        type: i % 2 === 0 ? 'white' : 'black'
+      });
+    }
+
+    const R2 = COIN_R * 4.1;
+    for (let i = 0; i < 12; i++) {
+      const a = i * Math.PI / 6 - Math.PI / 2;
+      list.push({
+        x: CX + Math.cos(a) * R2,
+        y: CY + Math.sin(a) * R2,
+        type: i % 2 === 0 ? 'black' : 'white'
+      });
+    }
+
+    return list.map((c, i) => ({
+      id: i,
+      x: c.x, y: c.y,
+      vx: 0, vy: 0,
+      r: COIN_R,
+      type: c.type,
+      pocketed: false
+    }));
+  }
+
+  // ---------- Striker ----------
+  function tempatkanStriker() {
+    const y = currentPlayer === 0 ? BY + BH - BASE_INSET : BY + BASE_INSET;
+    const x = cariXStriker(y, CX);
+    striker = {
+      x: x, y: y,
+      vx: 0, vy: 0,
+      r: STRIKER_R,
+      pocketed: false,
+      baseY: y,
+      baseMinX: BX + STRIKER_R + 10,
+      baseMaxX: BX + BW - STRIKER_R - 10
+    };
+  }
+
+  function cariXStriker(y, preferredX) {
+    for (let off = 0; off < BW / 2; off += 6) {
+      for (const sign of [0, -1, 1]) {
+        if (sign === 0 && off > 0) continue;
+        const x = preferredX + off * sign;
+        if (x < BX + STRIKER_R + 5 || x > BX + BW - STRIKER_R - 5) continue;
+        let ok = true;
+        for (const c of coins) {
+          if (c.pocketed) continue;
+          if (Math.hypot(c.x - x, c.y - y) < c.r + STRIKER_R + 2) { ok = false; break; }
+        }
+        if (ok) return x;
+      }
+    }
+    return preferredX;
+  }
+
+  function getBodies() {
+    const arr = [];
+    for (const c of coins) if (!c.pocketed) arr.push(c);
+    if (striker && !striker.pocketed) arr.push(striker);
+    return arr;
+  }
+
+  // ---------- Reset ----------
+  function resetGame() {
+    coins = buatKoin();
+    scores = [0, 0];
+    currentPlayer = 0;
+    state = 'play';
+    pocketedThisTurn = 0;
+    strikerFoul = false;
+    aiming = false;
+    aimPos = null;
+    move.atas.kiri = move.atas.kanan = false;
+    move.bawah.kiri = move.bawah.kanan = false;
+    tempatkanStriker();
+    updateUI();
+    tampilPesan('Giliran Pemain 1 (bawah)');
+  }
+
+  // ---------- UI ----------
+  function updateUI() {
+    document.getElementById('skor1').textContent = scores[0];
+    document.getElementById('skor2').textContent = scores[1];
+    document.getElementById('p1b').classList.toggle('aktif', currentPlayer === 0);
+    document.getElementById('p2').classList.toggle('aktif', currentPlayer === 1);
+
+    const atas = document.getElementById('kontrol-atas');
+    const bawah = document.getElementById('kontrol-bawah');
+
+    atas.classList.toggle('non-aktif', currentPlayer !== 1);
+    bawah.classList.toggle('non-aktif', currentPlayer !== 0);
+
+    atas.classList.toggle('aktif-p2', currentPlayer === 1);
+    bawah.classList.toggle('aktif-p1', currentPlayer === 0);
+  }
+
+  // ---------- Fisika ----------
+  function physicsStep() {
+    const bodies = getBodies();
+
+    for (const b of bodies) {
+      b.x += b.vx / SUBSTEPS;
+      b.y += b.vy / SUBSTEPS;
+    }
+
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        resolveCollision(bodies[i], bodies[j]);
+      }
+    }
+
+    for (const b of bodies) {
+      let nearPocket = false;
+      for (const p of POCKETS) {
+        if (Math.hypot(b.x - p.x, b.y - p.y) < POCKET_R + b.r * 0.5) {
+          nearPocket = true; break;
+        }
+      }
+      if (nearPocket) continue;
+
+      if (b.x - b.r < BX) { b.x = BX + b.r; b.vx = Math.abs(b.vx) * 0.65; }
+      if (b.x + b.r > BX + BW) { b.x = BX + BW - b.r; b.vx = -Math.abs(b.vx) * 0.65; }
+      if (b.y - b.r < BY) { b.y = BY + b.r; b.vy = Math.abs(b.vy) * 0.65; }
+      if (b.y + b.r > BY + BH) { b.y = BY + BH - b.r; b.vy = -Math.abs(b.vy) * 0.65; }
+    }
+  }
+
+  function resolveCollision(a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d2 = dx * dx + dy * dy;
+    const minD = a.r + b.r;
+    if (d2 === 0 || d2 > minD * minD) return;
+
+    const d = Math.sqrt(d2);
+    const nx = dx / d, ny = dy / d;
+    const overlap = minD - d;
+
+    a.x -= nx * overlap / 2; a.y -= ny * overlap / 2;
+    b.x += nx * overlap / 2; b.y += ny * overlap / 2;
+
+    const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
+    const vn = rvx * nx + rvy * ny;
+    if (vn > 0) return;
+
+    const e = 0.92;
+    const imp = -(1 + e) * vn / 2;
+    a.vx -= imp * nx; a.vy -= imp * ny;
+    b.vx += imp * nx; b.vy += imp * ny;
+  }
+
+  function updatePhysics() {
+    if (state !== 'moving') return;
+
+    for (let s = 0; s < SUBSTEPS; s++) physicsStep();
+
+    const bodies = getBodies();
+    for (const b of bodies) {
+      b.vx *= FRICTION;
+      b.vy *= FRICTION;
+      if (Math.hypot(b.vx, b.vy) < MIN_SPEED) { b.vx = 0; b.vy = 0; }
+    }
+
+    for (const b of bodies) {
+      for (const p of POCKETS) {
+        if (Math.hypot(b.x - p.x, b.y - p.y) < POCKET_R * 0.55) {
+          b.pocketed = true;
+          b.vx = 0; b.vy = 0;
+          onPocket(b);
+          break;
+        }
+      }
+    }
+
+    let moving = false;
+    for (const b of getBodies()) {
+      if (Math.abs(b.vx) > 0 || Math.abs(b.vy) > 0) { moving = true; break; }
+    }
+    if (!moving) endTurn();
+  }
+
+  function onPocket(b) {
+    if (b === striker) {
+      strikerFoul = true;
+      scores[currentPlayer] = Math.max(0, scores[currentPlayer] - 2);
+      tampilPesan('Striker masuk! −2 poin');
+    } else if (b.type === 'queen') {
+      scores[currentPlayer] += 3;
+      pocketedThisTurn++;
+      tampilPesan('👑 Queen! +3 poin');
+    } else {
+      scores[currentPlayer] += 1;
+      pocketedThisTurn++;
+      tampilPesan('Koin masuk! +1 poin');
+    }
+    updateUI();
+  }
+
+  function endTurn() {
+    const tersisa = coins.filter(c => !c.pocketed).length;
+    if (tersisa === 0) {
+      state = 'gameover';
+      return;
+    }
+
+    if (pocketedThisTurn > 0 && !strikerFoul) {
+      tampilPesan('🎯 Lanjut! Pemain ' + (currentPlayer + 1));
+    } else {
+      currentPlayer = 1 - currentPlayer;
+      tampilPesan('Giliran Pemain ' + (currentPlayer + 1) +
+                   (currentPlayer === 0 ? ' (bawah)' : ' (atas)'));
+    }
+
+    pocketedThisTurn = 0;
+    strikerFoul = false;
+    tempatkanStriker();
+    state = 'play';
+    updateUI();
+  }
+
+  // ---------- Tembak ----------
+  function tembak(power, angle) {
+    for (const b of getBodies()) {
+      if (b === striker) continue;
+      const dx = striker.x - b.x, dy = striker.y - b.y;
+      const d = Math.hypot(dx, dy);
+      const minD = striker.r + b.r;
+      if (d < minD && d > 0) {
+        const push = (minD - d) + 0.5;
+        striker.x += (dx / d) * push;
+        striker.y += (dy / d) * push;
+      }
+    }
+
+    striker.vx = Math.cos(angle) * power;
+    striker.vy = Math.sin(angle) * power;
+    state = 'moving';
+    pocketedThisTurn = 0;
+    strikerFoul = false;
+  }
+
+  // ---------- Input keyboard ----------
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.key] = true;
+    if ([' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) e.preventDefault();
+    if ((e.key === 'r' || e.key === 'R') && state === 'gameover') resetGame();
+  });
+  window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+  // ---------- Input pointer (bidik & tembak) ----------
+  const toCanvas = (cx, cy) => {
+    const r = canvas.getBoundingClientRect();
+    return {
+      x: (cx - r.left) * (W / r.width),
+      y: (cy - r.top) * (H / r.height)
+    };
+  };
+
+  canvas.addEventListener('pointerdown', e => {
+    if (state === 'gameover') { resetGame(); return; }
+    if (state !== 'play' || !striker) return;
+    aiming = true;
+    aimPos = toCanvas(e.clientX, e.clientY);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!aiming) return;
+    aimPos = toCanvas(e.clientX, e.clientY);
+  });
+  window.addEventListener('pointerup', e => {
+    if (!aiming) return;
+    aiming = false;
+    if (state !== 'play' || !striker || !aimPos) { aimPos = null; return; }
+
+    const dx = aimPos.x - striker.x;
+    const dy = aimPos.y - striker.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 12) { aimPos = null; return; }
+
+    const angle = Math.atan2(dy, dx);
+    const power = Math.min(MAX_POWER, 5 + dist * 0.09);
+    tembak(power, angle);
+    aimPos = null;
+  });
+  window.addEventListener('pointercancel', () => { aiming = false; aimPos = null; });
+
+  // ---------- Tombol kontrol ----------
+  function pasangTombol(id, sisi, arah) {
+    const btn = document.getElementById(id);
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      move[sisi][arah] = true;
+    });
+    btn.addEventListener('pointerup',    () => move[sisi][arah] = false);
+    btn.addEventListener('pointerleave', () => move[sisi][arah] = false);
+    btn.addEventListener('pointercancel',() => move[sisi][arah] = false);
+  }
+
+  pasangTombol('kiri-atas',  'atas',  'kiri');
+  pasangTombol('kanan-atas', 'atas',  'kanan');
+  pasangTombol('kiri-bawah', 'bawah', 'kiri');
+  pasangTombol('kanan-bawah','bawah', 'kanan');
+
+  // Lepas semua tombol kalau pointer global dilepas
+  window.addEventListener('pointerup', () => {
+    move.atas.kiri = move.atas.kanan = false;
+    move.bawah.kiri = move.bawah.kanan = false;
+  });
+
+  // ---------- Gambar ----------
+  function gambar() {
+    ctx.fillStyle = '#3a2418';
+    ctx.fillRect(0, 0, W, H);
+
+    const g = ctx.createRadialGradient(CX, CY, 20, CX, CY, BW / 2 + 40);
+    g.addColorStop(0, '#f5deb3');
+    g.addColorStop(1, '#d4b088');
+    ctx.fillStyle = g;
+    bulat(BX, BY, BW, BH, 8);
+    ctx.fill();
+
+    // Baseline
+    ctx.strokeStyle = '#8a2020';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(BX + 40, BY + BH - BASE_INSET);
+    ctx.lineTo(BX + BW - 40, BY + BH - BASE_INSET);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(BX + 40, BY + BASE_INSET);
+    ctx.lineTo(BX + BW - 40, BY + BASE_INSET);
+    ctx.stroke();
+
+    // Lingkaran baseline
+    ctx.strokeStyle = '#a03030';
+    ctx.lineWidth = 2;
+    [BX + BW / 2 - 150, BX + BW / 2, BX + BW / 2 + 150].forEach(x => {
+      ctx.beginPath();
+      ctx.arc(x, BY + BH - BASE_INSET, STRIKER_R + 6, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, BY + BASE_INSET, STRIKER_R + 6, 0, Math.PI * 2);
+      ctx.stroke();
+    });
+
+    // Lingkaran tengah
+    ctx.strokeStyle = '#8a2020';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(CX, CY, COIN_R * 5.5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#a03030';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(CX, CY, COIN_R * 2.8, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Lubang
+    for (const p of POCKETS) {
+      ctx.fillStyle = '#1a0f08';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, POCKET_R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, POCKET_R - 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,220,180,.25)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, POCKET_R - 1, -Math.PI * 0.8, -Math.PI * 0.2);
+      ctx.stroke();
+    }
+
+    // Koin
+    for (const c of coins) if (!c.pocketed) drawCoin(c);
+
+    // Striker
+    if (striker && !striker.pocketed && state !== 'gameover') drawStriker(striker);
+
+    // Bidik
+    if (aiming && aimPos && striker && !striker.pocketed) drawAim();
+
+    // Game over
+    if (state === 'gameover') {
+      ctx.fillStyle = 'rgba(0,0,0,.75)';
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f5deb3';
+      ctx.font = 'bold 42px system-ui, sans-serif';
+      ctx.fillText('GAME SELESAI', CX, CY - 70);
+
+      let pemenang, warna;
+      if (scores[0] > scores[1]) { pemenang = 'PEMAIN 1 MENANG!'; warna = '#d97706'; }
+      else if (scores[1] > scores[0]) { pemenang = 'PEMAIN 2 MENANG!'; warna = '#60a5fa'; }
+      else { pemenang = 'SERI!'; warna = '#facc15'; }
+
+      ctx.fillStyle = warna;
+      ctx.font = 'bold 30px system-ui, sans-serif';
+      ctx.fillText(pemenang, CX, CY - 15);
+
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 24px system-ui, sans-serif';
+      ctx.fillText('Pemain 1: ' + scores[0] + '   |   Pemain 2: ' + scores[1], CX, CY + 35);
+
+      ctx.fillStyle = '#facc15';
+      ctx.font = 'bold 16px system-ui, sans-serif';
+      ctx.fillText('Tekan R / sentuh untuk main lagi', CX, CY + 95);
+    }
+  }
+
+  function drawCoin(c) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 2;
+
+    let warna, tepi;
+    if (c.type === 'white') { warna = '#faf0e0'; tepi = '#8a6a48'; }
+    else if (c.type === 'black') { warna = '#3a2418'; tepi = '#1a0f08'; }
+    else { warna = '#c0392b'; tepi = '#6a0f00'; }
+
+    ctx.fillStyle = warna;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = tepi;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,.35)';
+    ctx.beginPath();
+    ctx.arc(c.x - c.r * 0.35, c.y - c.r * 0.35, c.r * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (c.type === 'queen') {
+      ctx.strokeStyle = 'rgba(255,220,180,.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r - 3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawStriker(s) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.6)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 3;
+
+    const warna = currentPlayer === 0 ? '#ffe4b5' : '#b8d8f0';
+    ctx.fillStyle = warna;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent';
+    ctx.strokeStyle = '#5a3a20';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(255,255,255,.6)';
+    ctx.beginPath();
+    ctx.arc(s.x - s.r * 0.3, s.y - s.r * 0.3, s.r * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = currentPlayer === 0 ? '#d97706' : '#2563eb';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(s.x, s.y, s.r - 3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawAim() {
+    const dx = aimPos.x - striker.x;
+    const dy = aimPos.y - striker.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist < 1) return;
+    const angle = Math.atan2(dy, dx);
+    const power = Math.min(1, dist / 260);
+
+    ctx.save();
+    ctx.strokeStyle = `rgba(200, 30, 60, ${0.5 + power * 0.5})`;
+    ctx.lineWidth = 3;
+    ctx.setLineDash([10, 8]);
+    ctx.beginPath();
+    ctx.moveTo(striker.x, striker.y);
+    const len = 120 + power * 180;
+    ctx.lineTo(striker.x + Math.cos(angle) * len,
+               striker.y + Math.sin(angle) * len);
+    ctx.stroke();
+    ctx.restore();
+
+    const ex = striker.x + Math.cos(angle) * len;
+    const ey = striker.y + Math.sin(angle) * len;
+    ctx.save();
+    ctx.fillStyle = `rgba(200, 30, 60, ${0.6 + power * 0.4})`;
+    ctx.translate(ex, ey);
+    ctx.rotate(angle);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(-12, -7);
+    ctx.lineTo(-12, 7);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Bar kekuatan
+    const barW = 160, barH = 12;
+    const bx = BX + 15, by = BY + BH - 22;
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    bulat(bx, by, barW, barH, 6); ctx.fill();
+    ctx.fillStyle = `hsl(${(1 - power) * 120}, 85%, 55%)`;
+    bulat(bx + 1, by + 1, (barW - 2) * power, barH - 2, 5); ctx.fill();
+    ctx.strokeStyle = '#5a3a20';
+    ctx.lineWidth = 1.5;
+    bulat(bx, by, barW, barH, 6); ctx.stroke();
+    ctx.restore();
+  }
+
+  function bulat(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // ---------- Loop ----------
+  function loop() {
+    // Gerak striker lewat tombol & keyboard
+    if (state === 'play' && striker && !striker.pocketed) {
+      const kiriAktif =
+        (currentPlayer === 0 && (move.bawah.kiri || keys['ArrowLeft'] || keys['a'] || keys['A'])) ||
+        (currentPlayer === 1 && move.atas.kiri);
+      const kananAktif =
+        (currentPlayer === 0 && (move.bawah.kanan || keys['ArrowRight'] || keys['d'] || keys['D'])) ||
+        (currentPlayer === 1 && move.atas.kanan);
+
+      if (kiriAktif)  striker.x = Math.max(striker.baseMinX, striker.x - 3.4);
+      if (kananAktif) striker.x = Math.min(striker.baseMaxX, striker.x + 3.4);
+    }
+
+    updatePhysics();
+    gambar();
+    requestAnimationFrame(loop);
+  }
+
+  resetGame();
+  loop();
+})();
+</script>
+</body>
+</html>
